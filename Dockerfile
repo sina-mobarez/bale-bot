@@ -1,12 +1,10 @@
 FROM python:3.11-slim
 
 # ── Iranize inject ──────────────────────────────────────────────────────────────
-RUN UBUNTU_CODENAME=$(lsb_release -cs) && tee /etc/apt/sources.list > /dev/null <<EOF
-deb https://mirror.mobinhost.com/ubuntu $UBUNTU_CODENAME main restricted universe multiverse
-deb https://mirror.mobinhost.com/ubuntu $UBUNTU_CODENAME-updates main restricted universe multiverse
-deb https://mirror.mobinhost.com/ubuntu $UBUNTU_CODENAME-backports main restricted universe multiverse
-deb https://mirror.mobinhost.com/ubuntu $UBUNTU_CODENAME-security main restricted universe multiverse
-EOF
+RUN . /etc/os-release && \
+    echo "deb http://mirror-linux.runflare.com/debian $VERSION_CODENAME main" > /etc/apt/sources.list && \
+    echo "deb http://mirror-linux.runflare.com/debian-security $VERSION_CODENAME-security main" >> /etc/apt/sources.list
+
 # ── System deps ──────────────────────────────────────────────────────────────
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
