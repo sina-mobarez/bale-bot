@@ -1,5 +1,5 @@
 Django
-python-telegram-bot
+telegram-bale-bot
 psycopg2-binary
 python-decouple
 django-jazzmin
