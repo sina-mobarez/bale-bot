@@ -11,6 +11,7 @@ ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1', cast=Csv(
 
 # ─── Applications ─────────────────────────────────────────────────────────────
 INSTALLED_APPS = [
+    # Jazzmin must come before django.contrib.admin
     'jazzmin',
     'django.contrib.admin',
     'django.contrib.auth',
@@ -94,7 +95,10 @@ USE_TZ = True
 # ─── Static & Media ───────────────────────────────────────────────────────────
 STATIC_URL = config('STATIC_URL', default='/static/')
 STATIC_ROOT = BASE_DIR / 'staticfiles'
-STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+STORAGES = {
+    'default': {'BACKEND': 'django.core.files.storage.FileSystemStorage'},
+    'staticfiles': {'BACKEND': 'whitenoise.storage.CompressedManifestStaticFilesStorage'},
+}
 
 MEDIA_URL = config('MEDIA_URL', default='/media/')
 MEDIA_ROOT = BASE_DIR / 'media'
@@ -105,6 +109,10 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 BALE_BOT_TOKEN = config('BALE_BOT_TOKEN', default='')
 BALE_API_BASE_URL = config('BALE_API_BASE_URL', default='https://tapi.bale.ai/bot')
 BALE_FILE_BASE_URL = config('BALE_FILE_BASE_URL', default='https://tapi.bale.ai/file/bot')
+
+# ─── Bale Admin Notifications ────────────────────────────────────────────────
+# Set to a Bale chat_id to receive a message on each new registration
+BALE_ADMIN_CHAT_ID = config('BALE_ADMIN_CHAT_ID', default=None)
 
 # ─── Logging ──────────────────────────────────────────────────────────────────
 LOGGING = {

@@ -1,28 +1,30 @@
 # 🤖 Bale Registration Bot
 
-A production-ready **Django + python-telegram-bot** application that:
+A **production-ready** Django bot for [Bale Messenger](https://bale.ai) that:
 
-- Asks users a **configurable set of questions** via a Bale messenger bot
-- **Validates** answers (phone, email, number, multiple-choice)
-- **Stores** all registrations in PostgreSQL
-- Sends a **customizable final message** (text / file / photo / link) on completion
-- Provides a **rich Django Admin panel** (Jazzmin UI) for managing questions, final messages, and viewing registrations
-- Exports registrations to **CSV**
+- Guides users through a **configurable question flow** and registers them
+- **Validates** answers per type: phone, email, number, multiple-choice with buttons
+- Sends a **customizable final message** on completion — text, file, photo, link, or combos
+- Provides a rich **Django Admin panel** (Jazzmin) with live stats, answer tables, CSV export
+- Notifies an **admin Bale chat** on every new registration (optional)
+- Supports **polling** and **webhook** modes
+- Ships with **97 passing tests**, Docker Compose, nginx config, and a Makefile
 
 ---
 
 ## Table of Contents
 
 1. [Architecture](#architecture)
-2. [Quick Start (Docker)](#quick-start-docker)
-3. [Quick Start (Local)](#quick-start-local)
+2. [Quick Start — Docker](#quick-start--docker)
+3. [Quick Start — Local](#quick-start--local)
 4. [Admin Panel Guide](#admin-panel-guide)
 5. [Bot Commands](#bot-commands)
 6. [Environment Variables](#environment-variables)
 7. [Management Commands](#management-commands)
-8. [Project Structure](#project-structure)
-9. [Production Deployment](#production-deployment)
-10. [Extending the Bot](#extending-the-bot)
+8. [Running Tests](#running-tests)
+9. [Project Structure](#project-structure)
+10. [Production Deployment](#production-deployment)
+11. [Extending the Bot](#extending-the-bot)
 
 ---
 
@@ -33,36 +35,36 @@ A production-ready **Django + python-telegram-bot** application that:
 │                    Docker Compose                        │
 │                                                         │
 │  ┌──────────┐    ┌──────────────┐    ┌──────────────┐  │
-│  │ PostgreSQL│←───│  Django Web  │    │  Bale Bot    │  │
+│  │PostgreSQL│◄───│  Django Web  │    │  Bale Bot    │  │
 │  │  (db)    │    │  (Gunicorn)  │    │  (polling)   │  │
 │  └──────────┘    │  port 8000   │    │              │  │
-│        ↑         └──────────────┘    └──────────────┘  │
-│        │                ↑                    ↑          │
-│        └────────────────┴────────────────────┘          │
-│                   shared DB + media                     │
+│        ▲         └──────────────┘    └──────────────┘  │
+│        └──────────────────┴────────────────────────────┘│
+│                    shared DB + media                     │
 └─────────────────────────────────────────────────────────┘
-         ↑
-    ┌──────────┐
-    │  Nginx   │  (optional, for HTTPS in production)
-    │  80/443  │
-    └──────────┘
+              ▲ (optional)
+         ┌──────────┐
+         │  Nginx   │  HTTPS termination, static/media
+         │  80/443  │
+         └──────────┘
 ```
 
-**Key tech choices:**
-- **`python-telegram-bot` v21** (async) pointed at Bale's API endpoint `https://tapi.bale.ai/bot`
-- **Django 4.2** with async ORM — the bot uses `sync_to_async` wrappers, zero blocking
-- **Jazzmin** for a polished, RTL-friendly admin UI
-- **ConversationHandler** with dynamic question loading from DB per update
+**Key tech decisions:**
+
+| Concern | Choice | Why |
+|---|---|---|
+| Bot library | `telegram-bale-bot` (pyTelegramBotAPI fork) | Built for Bale; auto-routes to `tapi.bale.ai` by token length; no unsupported API calls |
+| State machine | DB-driven via `RegistrationSession.current_question_index` | Survives restarts; no in-memory state |
+| Admin UI | Django Admin + Jazzmin | RTL-friendly, live stats, CSV export, progress bars |
+| Web server | Gunicorn + WhiteNoise | Production-ready, serves static files directly |
 
 ---
 
-## Quick Start (Docker)
+## Quick Start — Docker
 
 ### Prerequisites
 - Docker ≥ 24 and Docker Compose v2
 - A Bale bot token from **@BotFather** in Bale messenger
-
-### Steps
 
 ```bash
 # 1. Clone / unzip the project
@@ -70,52 +72,58 @@ cd bale_registration_bot
 
 # 2. Configure environment
 cp .env.example .env
-nano .env  # fill in BALE_BOT_TOKEN, DB_PASSWORD, SECRET_KEY, etc.
+nano .env
+# Required: BALE_BOT_TOKEN, DB_PASSWORD, SECRET_KEY
 
-# 3. Build and start
+# 3. Build and start all services
 docker compose up -d --build
 
-# 4. Seed sample questions (optional)
+# 4. Seed sample questions (optional but recommended for first run)
 docker compose exec bot python manage.py seed_sample_data
 
-# 5. Open the admin panel
+# 5. Open admin panel
 open http://localhost:8000/admin/
 # Login: DJANGO_SUPERUSER_USERNAME / DJANGO_SUPERUSER_PASSWORD from .env
 ```
 
-That's it. The bot is polling Bale and the admin is live.
+The bot starts polling immediately. Logs:
+```bash
+docker compose logs -f bot   # bot activity
+docker compose logs -f web   # admin panel
+```
 
 ---
 
-## Quick Start (Local)
+## Quick Start — Local
 
 ```bash
-# 1. Create a virtual environment
-python -m venv .venv
-source .venv/bin/activate     # Windows: .venv\Scripts\activate
+# 1. Create virtual environment
+python -m venv .venv && source .venv/bin/activate
 
 # 2. Install dependencies
 pip install -r requirements.txt
 
-# 3. Configure environment
+# 3. Configure
 cp .env.example .env
-# Edit .env — set DB credentials and BALE_BOT_TOKEN
-# For local dev you can use SQLite by changing DATABASES in settings.py
+# Edit .env — set BALE_BOT_TOKEN + DB credentials
 
-# 4. Apply migrations
+# 4. Migrate and seed
 python manage.py migrate
-
-# 5. Create superuser
 python manage.py createsuperuser
-
-# 6. Seed sample data
 python manage.py seed_sample_data
 
-# 7. Terminal A — Django admin
+# 5. Terminal A — Admin web
 python manage.py runserver
 
-# 8. Terminal B — Bale bot
+# 6. Terminal B — Bale bot
 python manage.py runbot
+```
+
+Or use the Makefile:
+```bash
+make install && make migrate && make seed
+make run-web    # Terminal A
+make run-bot    # Terminal B
 ```
 
 ---
@@ -124,39 +132,52 @@ python manage.py runbot
 
 Open `http://localhost:8000/admin/` and log in.
 
-### Creating Questions (`سوالات`)
+### Stats Dashboard
+
+The **کاربران ربات** (BotUser) page shows a live stats bar at the top:
+
+| Card | Meaning |
+|---|---|
+| کل کاربران | Total users who ever pressed /start |
+| ثبت‌نام کامل | Completed registrations |
+| در حال ثبت‌نام | Active sessions in progress |
+| بلاک شده | Blocked users |
+| ثبت‌نام امروز | New completions today |
+| نرخ تکمیل | Completion % |
+
+### Managing Questions (`سوالات`)
 
 | Field | Description |
 |---|---|
-| **ترتیب (Order)** | Questions are asked in ascending order (1, 2, 3…) |
-| **متن سوال (Text)** | The message sent to the user |
-| **نام فیلد (Field Name)** | Slug key used to store the answer in JSON (e.g. `full_name`) |
-| **نوع سوال (Type)** | `text` / `phone` / `email` / `number` / `choice` |
-| **گزینه‌ها (Choices)** | For `choice` type: one option per line |
+| **ترتیب** | Questions are asked in ascending order (1, 2, 3…) |
+| **متن سوال** | The message text sent to the user |
+| **نام فیلد** | Slug key used to store the answer, e.g. `full_name` |
+| **نوع سوال** | `text` / `phone` / `email` / `number` / `choice` |
+| **گزینه‌ها** | For `choice` type: one option per line; shown as keyboard buttons |
 | **راهنمای اعتبارسنجی** | Error message shown on invalid input |
-| **اجباری (Required)** | If checked, blank answers are rejected |
-| **فعال (Active)** | Toggle to include/exclude without deleting |
+| **اجباری** | If checked, blank answers are rejected |
+| **فعال** | Toggle to include/exclude without deleting |
 
-### Creating a Final Message (`پیام‌های نهایی`)
+### Managing the Final Message (`پیام‌های نهایی`)
 
-Choose one of six types:
+Choose a message type:
 
-| Type | What gets sent |
+| Type | What is sent |
 |---|---|
-| `متن` | A plain Markdown text message |
-| `فایل` | A document/file attachment |
-| `تصویر` | A photo |
-| `لینک` | Text + inline button linking to a URL |
-| `متن + فایل` | Text message followed by a file |
-| `متن + لینک` | Text message + inline link button |
+| `متن` | Plain Markdown text |
+| `فایل` | File attachment (any format) |
+| `تصویر` | Photo |
+| `لینک` | Text + inline URL button |
+| `متن + فایل` | Text then file |
+| `متن + لینک` | Text with inline link button |
 
-> ⚠️ Only **one** FinalMessage can be active. Activating a new one auto-deactivates the previous one.
+> ⚠️ Only **one** FinalMessage can be active. Activating a new one auto-deactivates the previous.
 
-### Viewing Registrations
+### User Management
 
-- **کاربران ربات** — all users who have started the bot
-- **جلسات ثبت‌نام** — each session shows a formatted table of Q→A pairs
-- Click any user to see their inline session with all answers
+- **کاربران ربات** — full user list; click any user to see their session and answers table
+- **Bulk actions** — Export CSV, block, unblock, reset registration
+- **📥 خروجی CSV همه کاربران** button — exports all users at once (top of list page)
 
 ---
 
@@ -165,8 +186,8 @@ Choose one of six types:
 | Command | Description |
 |---|---|
 | `/start` | Begin registration (or resume if in progress) |
-| `/cancel` | Cancel the current registration flow |
-| `/restart` | Reset session and start fresh from Q1 |
+| `/cancel` | Cancel and discard current flow |
+| `/restart` | Hard reset — wipes session and starts from Q1 |
 
 ---
 
@@ -174,46 +195,90 @@ Choose one of six types:
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `SECRET_KEY` | ✅ | — | Django secret key |
-| `DEBUG` | | `False` | Enable debug mode |
+| `SECRET_KEY` | ✅ | — | Django secret key (50+ random chars) |
+| `DEBUG` | | `False` | Enable Django debug mode |
 | `ALLOWED_HOSTS` | ✅ | `localhost` | Comma-separated host list |
 | `BALE_BOT_TOKEN` | ✅ | — | Token from @BotFather in Bale |
-| `BALE_API_BASE_URL` | | `https://tapi.bale.ai/bot` | Bale API base URL |
-| `BALE_FILE_BASE_URL` | | `https://tapi.bale.ai/file/bot` | Bale file API URL |
+| `BALE_API_BASE_URL` | | `https://tapi.bale.ai/bot` | Override only if using a custom Bale API |
+| `BALE_FILE_BASE_URL` | | `https://tapi.bale.ai/file/bot` | Override only if using a custom Bale file API |
+| `BALE_ADMIN_CHAT_ID` | | — | Your Bale user ID — receive a ping on each new registration |
 | `DB_NAME` | ✅ | `bale_bot_db` | PostgreSQL database name |
-| `DB_USER` | ✅ | `bale_bot_user` | PostgreSQL user |
+| `DB_USER` | ✅ | `bale_bot_user` | PostgreSQL username |
 | `DB_PASSWORD` | ✅ | — | PostgreSQL password |
-| `DB_HOST` | | `db` | DB host (use `localhost` for local dev) |
+| `DB_HOST` | | `db` | DB host (`localhost` for local dev) |
 | `DB_PORT` | | `5432` | DB port |
-| `DJANGO_SUPERUSER_USERNAME` | | `admin` | Auto-created admin username |
-| `DJANGO_SUPERUSER_PASSWORD` | | — | Auto-created admin password |
-| `DJANGO_SUPERUSER_EMAIL` | | — | Auto-created admin email |
+| `DJANGO_SUPERUSER_USERNAME` | | `admin` | Auto-created on first Docker startup |
+| `DJANGO_SUPERUSER_PASSWORD` | | — | Auto-created on first Docker startup |
+| `DJANGO_SUPERUSER_EMAIL` | | — | Auto-created on first Docker startup |
 
 ---
 
 ## Management Commands
 
 ```bash
-# Start the bot process
+# ── Bot ──────────────────────────────────────────────────────────
+# Start polling (default)
 python manage.py runbot
 
-# Seed sample questions + final message for testing
+# Start in webhook mode
+python manage.py runbot --mode webhook \
+  --webhook-url https://yourdomain.com/bale/ \
+  --port 8443
+
+# ── Data ─────────────────────────────────────────────────────────
+# Seed 5 sample questions + a final message
 python manage.py seed_sample_data
 
-# Re-seed (deletes existing data first)
+# Re-seed (clears all existing first)
 python manage.py seed_sample_data --reset
 
 # Export all completed registrations to CSV
 python manage.py export_registrations
-
-# Export to a specific path
 python manage.py export_registrations --output /tmp/users.csv
 
-# Standard Django commands
+# Broadcast a message to all registered users
+python manage.py broadcast --message "📢 اطلاعیه جدید"
+
+# Broadcast a file
+python manage.py broadcast --file /path/to/doc.pdf --message "فایل ضمیمه"
+
+# Dry-run (shows recipients without sending)
+python manage.py broadcast --message "تست" --dry-run
+
+# ── Django ───────────────────────────────────────────────────────
 python manage.py migrate
 python manage.py createsuperuser
 python manage.py collectstatic
 ```
+
+---
+
+## Running Tests
+
+No database server needed — tests use in-memory SQLite:
+
+```bash
+# Install test deps (already in requirements.txt)
+pip install pytest pytest-django
+
+# Run all tests
+python -m pytest tests/ -v
+
+# Run a specific test file
+python -m pytest tests/test_handlers.py -v
+
+# Run with coverage
+pip install pytest-cov
+python -m pytest tests/ --cov=apps --cov-report=term-missing
+```
+
+**97 tests** covering:
+
+| Test file | What it covers |
+|---|---|
+| `test_bot.py` | Models, validators, flow helpers, admin CSV export, management commands (Django `TestCase`) |
+| `test_models.py` | Model constraints, FinalMessage single-active rule, session/user relationships (pytest-django) |
+| `test_handlers.py` | Validator edge cases (parametrize), DB helpers, full registration flow simulation |
 
 ---
 
@@ -223,30 +288,42 @@ python manage.py collectstatic
 bale_registration_bot/
 │
 ├── config/
-│   ├── settings.py          # All settings (DB, Bale, Jazzmin, Logging)
-│   ├── urls.py              # Admin URL routing
+│   ├── settings.py          # All settings: DB, Bale, Jazzmin, Logging
+│   ├── test_settings.py     # Test overrides (SQLite in-memory)
+│   ├── urls.py              # Admin + export URL routing
 │   └── wsgi.py
 │
 ├── apps/
-│   ├── registration/        # Domain models + admin
+│   ├── registration/        # Domain: models + admin
 │   │   ├── models.py        # Question, FinalMessage, BotUser, RegistrationSession
-│   │   ├── admin.py         # Rich admin: badges, inline answers table, bulk actions
-│   │   └── migrations/
-│   │       └── 0001_initial.py
+│   │   ├── admin.py         # Jazzmin admin: stats bar, inline answers, CSV export
+│   │   ├── migrations/
+│   │   │   └── 0001_initial.py
+│   │   └── templates/
+│   │       └── admin/registration/botuser/
+│   │           └── change_list.html  # Stats bar + Export All button
 │   │
-│   └── bot/                 # Bot logic
-│       ├── handlers.py      # ConversationHandler, validators, final-message sender
+│   └── bot/                 # Bot logic + management commands
+│       ├── handlers.py      # Rate limiter, DB state machine, final-message sender,
+│       │                    # admin notifications, register_handlers()
 │       └── management/commands/
-│           ├── runbot.py            # python manage.py runbot
-│           ├── seed_sample_data.py  # python manage.py seed_sample_data
-│           └── export_registrations.py  # python manage.py export_registrations
+│           ├── runbot.py              # polling or webhook mode
+│           ├── seed_sample_data.py    # seed 5 sample Q's + final message
+│           ├── export_registrations.py # CSV export to file
+│           └── broadcast.py          # bulk message sender with rate limiting
 │
-├── nginx/
-│   └── nginx.conf           # Production nginx with HTTPS
+├── tests/
+│   ├── test_bot.py          # Django TestCase — models, validators, admin, commands
+│   ├── test_models.py       # pytest — model constraints and rules
+│   └── test_handlers.py     # pytest — validators (parametrized), DB helpers, flows
 │
+├── nginx/nginx.conf         # Production HTTPS config with security headers
 ├── Dockerfile
-├── docker-compose.yml       # db + web + bot services
+├── docker-compose.yml       # db + web + bot services with health checks
 ├── entrypoint.sh            # wait-for-db → migrate → collectstatic → start
+├── Makefile                 # Developer convenience targets
+├── pytest.ini
+├── conftest.py              # Shared pytest fixtures
 ├── requirements.txt
 ├── .env.example
 └── .gitignore
@@ -256,32 +333,42 @@ bale_registration_bot/
 
 ## Production Deployment
 
-### 1. Secure your `.env`
+### 1. Harden `.env`
+
 ```bash
-SECRET_KEY=<50+ random characters>
+SECRET_KEY=<50+ random characters, e.g. from: python -c "import secrets; print(secrets.token_urlsafe(50))">
 DEBUG=False
 ALLOWED_HOSTS=yourdomain.com,www.yourdomain.com
-DB_PASSWORD=<strong password>
-DJANGO_SUPERUSER_PASSWORD=<strong password>
+DB_PASSWORD=<strong unique password>
+DJANGO_SUPERUSER_PASSWORD=<strong unique password>
+BALE_ADMIN_CHAT_ID=<your Bale user ID, find it with @userinfobot>
 ```
 
 ### 2. Enable Nginx + HTTPS
-```bash
-# In docker-compose.yml, uncomment the nginx service
-# Place TLS certs in ./nginx/certs/
-# (use Certbot / Let's Encrypt)
 
-# Update nginx.conf server_name to your domain
+```bash
+# 1. Uncomment nginx service in docker-compose.yml
+# 2. Replace yourdomain.com in nginx/nginx.conf
+# 3. Place TLS certificates in ./nginx/certs/
+#    (use Certbot: certbot certonly --standalone -d yourdomain.com)
+
+mkdir -p nginx/certs
+cp /etc/letsencrypt/live/yourdomain.com/fullchain.pem nginx/certs/
+cp /etc/letsencrypt/live/yourdomain.com/privkey.pem nginx/certs/
 ```
 
 ### 3. Deploy
+
 ```bash
 docker compose up -d --build
-docker compose logs -f bot    # watch bot logs
-docker compose logs -f web    # watch web logs
+docker compose logs -f        # watch all logs
+
+# Verify
+curl http://localhost:8000/admin/login/   # should return 200
 ```
 
-### 4. Update without downtime
+### 4. Zero-downtime updates
+
 ```bash
 git pull
 docker compose build
@@ -294,29 +381,36 @@ docker compose up -d          # rolling restart
 
 ### Add a new question type (e.g. date)
 
-1. Add `DATE = 'date', 'تاریخ'` to `Question.QuestionType`
-2. Add a new migration: `python manage.py makemigrations`
-3. Add validation in `validate_answer()` in `handlers.py`
+1. Add `DATE = 'date', 'تاریخ'` to `Question.QuestionType` in `models.py`
+2. `python manage.py makemigrations && python manage.py migrate`
+3. Add a branch in `validate_answer()` in `handlers.py`
 
-### Add a broadcast command
-Create `apps/bot/management/commands/broadcast.py` using:
-```python
-await context.bot.send_message(chat_id=user.bale_user_id, text=msg)
+### Switch to webhook mode
+
+```bash
+# In production with a public HTTPS domain:
+python manage.py runbot \
+  --mode webhook \
+  --webhook-url https://yourdomain.com/YOUR_BOT_TOKEN/ \
+  --port 8443
+
+# Requires: pip install flask
+# In Docker: set CMD to ["python", "manage.py", "runbot", "--mode", "webhook", ...]
 ```
 
-### Webhook instead of polling
-In `runbot.py`, replace `run_polling(...)` with:
-```python
-await application.run_webhook(
-    listen="0.0.0.0",
-    port=8443,
-    url_path=settings.BALE_BOT_TOKEN,
-    webhook_url=f"https://yourdomain.com/{settings.BALE_BOT_TOKEN}",
-)
+### Add a welcome image
+
+In `FinalMessage`, set `message_type = photo`, upload a photo, and add a caption.
+
+### Broadcast to all users
+
+```bash
+python manage.py broadcast --message "📢 پیام مهم" --delay 300
+python manage.py broadcast --file report.pdf --all-users
 ```
 
 ---
 
 ## License
 
-MIT — use freely.
+MIT — use freely, credit appreciated.

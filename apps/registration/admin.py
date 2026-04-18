@@ -1,12 +1,13 @@
 """
 Admin configuration for the registration app.
-Provides a rich admin UI for managing questions, final messages, and user registrations.
 """
+import csv
 from django.contrib import admin
+from django.contrib import messages as django_messages
+from django.http import HttpResponse
 from django.utils.html import format_html
 from django.utils.safestring import mark_safe
-from django.db.models import Count
-from django.urls import reverse
+from django.utils import timezone
 
 from .models import Question, FinalMessage, BotUser, RegistrationSession
 
@@ -24,6 +25,7 @@ class QuestionAdmin(admin.ModelAdmin):
     list_filter = ('question_type', 'is_required', 'is_active')
     search_fields = ('text', 'field_name')
     ordering = ('order',)
+    readonly_fields = ('created_at', 'updated_at')
     fieldsets = (
         ('محتوا', {
             'fields': ('order', 'text', 'field_name', 'question_type', 'choices'),
@@ -31,34 +33,38 @@ class QuestionAdmin(admin.ModelAdmin):
         ('اعتبارسنجی و تنظیمات', {
             'fields': ('validation_hint', 'is_required', 'is_active'),
         }),
+        ('اطلاعات سیستمی', {
+            'fields': ('created_at', 'updated_at'),
+            'classes': ('collapse',),
+        }),
     )
-    readonly_fields = ('created_at', 'updated_at')
 
     def order_badge(self, obj):
         return format_html(
-            '<span style="background:#0d6efd;color:white;padding:2px 8px;'
-            'border-radius:10px;font-weight:bold">{}</span>',
-            obj.order
+            '<span style="background:#0d6efd;color:#fff;padding:2px 10px;'
+            'border-radius:12px;font-weight:bold;font-size:0.9em">{}</span>',
+            obj.order,
         )
     order_badge.short_description = 'ترتیب'
     order_badge.admin_order_field = 'order'
 
     def text_preview(self, obj):
-        return obj.text[:80] + '...' if len(obj.text) > 80 else obj.text
+        return obj.text[:80] + '…' if len(obj.text) > 80 else obj.text
     text_preview.short_description = 'متن سوال'
 
     def question_type_badge(self, obj):
         colors = {
-            'text': '#6c757d',
-            'phone': '#198754',
-            'email': '#0dcaf0',
+            'text':   '#6c757d',
+            'phone':  '#198754',
+            'email':  '#0dcaf0',
             'number': '#fd7e14',
             'choice': '#6f42c1',
         }
         color = colors.get(obj.question_type, '#6c757d')
         return format_html(
-            '<span style="background:{};color:white;padding:2px 8px;border-radius:10px">{}</span>',
-            color, obj.get_question_type_display()
+            '<span style="background:{};color:#fff;padding:2px 10px;'
+            'border-radius:12px;font-size:0.85em">{}</span>',
+            color, obj.get_question_type_display(),
         )
     question_type_badge.short_description = 'نوع'
 
@@ -71,18 +77,17 @@ class FinalMessageAdmin(admin.ModelAdmin):
     list_display_links = ('title',)
     list_filter = ('message_type', 'is_active')
     search_fields = ('title', 'text_content')
-    readonly_fields = ('created_at', 'updated_at', 'preview_section')
+    readonly_fields = ('created_at', 'updated_at', 'content_preview')
     fieldsets = (
         ('اطلاعات اصلی', {
             'fields': ('title', 'message_type', 'is_active'),
         }),
         ('محتوا', {
             'fields': ('text_content', 'file', 'photo', 'link_url', 'link_text'),
-            'description': 'بسته به نوع پیام، فیلدهای مربوطه را پر کنید',
+            'description': 'بسته به نوع پیام فیلدهای مربوطه را پر کنید.',
         }),
         ('پیش‌نمایش', {
-            'fields': ('preview_section',),
-            'classes': ('collapse',),
+            'fields': ('content_preview',),
         }),
         ('اطلاعات سیستمی', {
             'fields': ('created_at', 'updated_at'),
@@ -92,17 +97,18 @@ class FinalMessageAdmin(admin.ModelAdmin):
 
     def message_type_badge(self, obj):
         colors = {
-            'text': '#0d6efd',
-            'file': '#fd7e14',
-            'photo': '#198754',
-            'link': '#6f42c1',
+            'text':      '#0d6efd',
+            'file':      '#fd7e14',
+            'photo':     '#198754',
+            'link':      '#6f42c1',
             'text_file': '#dc3545',
             'text_link': '#0dcaf0',
         }
         color = colors.get(obj.message_type, '#6c757d')
         return format_html(
-            '<span style="background:{};color:white;padding:2px 8px;border-radius:10px">{}</span>',
-            color, obj.get_message_type_display()
+            '<span style="background:{};color:#fff;padding:2px 10px;'
+            'border-radius:12px;font-size:0.85em">{}</span>',
+            color, obj.get_message_type_display(),
         )
     message_type_badge.short_description = 'نوع پیام'
 
@@ -112,18 +118,28 @@ class FinalMessageAdmin(admin.ModelAdmin):
         return format_html('<span style="color:#dc3545;font-size:1.2em">❌ غیرفعال</span>')
     is_active_badge.short_description = 'وضعیت'
 
-    def preview_section(self, obj):
+    def content_preview(self, obj):
         parts = []
         if obj.text_content:
-            parts.append(f'<p><strong>متن:</strong><br>{obj.text_content[:200]}</p>')
+            parts.append(
+                f'<div style="background:#f8f9fa;padding:8px 12px;border-radius:6px;'
+                f'border-left:3px solid #0d6efd;margin-bottom:8px">'
+                f'<strong>متن:</strong><br>{obj.text_content[:300]}</div>'
+            )
         if obj.link_url:
-            parts.append(f'<p><strong>لینک:</strong> <a href="{obj.link_url}" target="_blank">{obj.link_text or obj.link_url}</a></p>')
+            parts.append(
+                f'<p><strong>لینک:</strong> '
+                f'<a href="{obj.link_url}" target="_blank">{obj.link_text or obj.link_url}</a></p>'
+            )
         if obj.file:
-            parts.append(f'<p><strong>فایل:</strong> {obj.file.name}</p>')
+            parts.append(f'<p>📎 <strong>فایل:</strong> {obj.file.name.split("/")[-1]}</p>')
         if obj.photo:
-            parts.append(f'<p><strong>تصویر:</strong> <img src="{obj.photo.url}" style="max-height:150px"></p>')
-        return mark_safe(''.join(parts) if parts else '<p>محتوایی برای پیش‌نمایش وجود ندارد</p>')
-    preview_section.short_description = 'پیش‌نمایش'
+            parts.append(
+                f'<p><img src="{obj.photo.url}" '
+                f'style="max-height:120px;border-radius:6px;border:1px solid #dee2e6"></p>'
+            )
+        return mark_safe(''.join(parts) or '<p style="color:#6c757d">محتوایی تنظیم نشده</p>')
+    content_preview.short_description = 'پیش‌نمایش'
 
 
 # ─── BotUser ──────────────────────────────────────────────────────────────────
@@ -131,25 +147,74 @@ class FinalMessageAdmin(admin.ModelAdmin):
 class RegistrationSessionInline(admin.StackedInline):
     model = RegistrationSession
     extra = 0
-    readonly_fields = ('current_question_index', 'answers_display', 'is_completed', 'started_at', 'completed_at')
-    fields = ('current_question_index', 'answers_display', 'is_completed', 'started_at', 'completed_at')
+    readonly_fields = (
+        'current_question_index', 'answers_table',
+        'is_completed', 'started_at', 'completed_at',
+    )
+    fields = (
+        'current_question_index', 'answers_table',
+        'is_completed', 'started_at', 'completed_at',
+    )
     can_delete = False
 
-    def answers_display(self, obj):
-        if not obj.answers:
-            return 'بدون پاسخ'
+    def answers_table(self, obj):
+        if not obj or not obj.answers:
+            return '—'
+        questions = {q.field_name: q.text for q in Question.objects.all()}
         rows = ''.join(
-            f'<tr><td style="padding:4px 12px;font-weight:bold">{k}</td>'
-            f'<td style="padding:4px 12px">{v}</td></tr>'
+            f'<tr>'
+            f'<td style="padding:5px 10px;border:1px solid #dee2e6;font-weight:600;'
+            f'background:#f8f9fa;width:40%">{questions.get(k, k)}</td>'
+            f'<td style="padding:5px 10px;border:1px solid #dee2e6">{v}</td>'
+            f'</tr>'
             for k, v in obj.answers.items()
         )
         return mark_safe(
-            f'<table style="border-collapse:collapse;width:100%">'
-            f'<thead><tr><th style="padding:4px 12px;text-align:left">فیلد</th>'
-            f'<th style="padding:4px 12px;text-align:left">پاسخ</th></tr></thead>'
-            f'<tbody>{rows}</tbody></table>'
+            f'<table style="border-collapse:collapse;width:100%;font-size:0.9em">'
+            f'<thead><tr>'
+            f'<th style="padding:5px 10px;border:1px solid #dee2e6;background:#e9ecef">سوال</th>'
+            f'<th style="padding:5px 10px;border:1px solid #dee2e6;background:#e9ecef">پاسخ</th>'
+            f'</tr></thead><tbody>{rows}</tbody></table>'
         )
-    answers_display.short_description = 'پاسخ‌ها'
+    answers_table.short_description = 'پاسخ‌ها'
+
+
+def _export_users_csv(queryset):
+    questions = list(Question.objects.filter(is_active=True).order_by('order'))
+    field_names = [q.field_name for q in questions]
+    q_labels = {q.field_name: q.text[:40] for q in questions}
+
+    response = HttpResponse(content_type='text/csv; charset=utf-8-sig')
+    ts = timezone.now().strftime('%Y%m%d_%H%M%S')
+    response['Content-Disposition'] = f'attachment; filename="registrations_{ts}.csv"'
+    response.write('\ufeff')  # BOM for Excel
+
+    writer = csv.writer(response)
+    writer.writerow(
+        ['شناسه بله', 'نام کاربری', 'نام', 'نام خانوادگی',
+         'ثبت‌نام شده', 'زمان ثبت‌نام', 'اولین بازدید']
+        + [q_labels.get(f, f) for f in field_names]
+    )
+    for user in queryset.iterator():
+        answers = {}
+        try:
+            if hasattr(user, 'session') and user.session and user.session.answers:
+                answers = user.session.answers
+        except Exception:
+            pass
+        writer.writerow(
+            [
+                user.bale_user_id,
+                user.username,
+                user.first_name,
+                user.last_name,
+                '✓' if user.is_registered else '—',
+                user.registered_at.strftime('%Y-%m-%d %H:%M') if user.registered_at else '—',
+                user.first_seen.strftime('%Y-%m-%d %H:%M'),
+            ]
+            + [answers.get(f, '—') for f in field_names]
+        )
+    return response
 
 
 @admin.register(BotUser)
@@ -164,7 +229,32 @@ class BotUserAdmin(admin.ModelAdmin):
     readonly_fields = ('bale_user_id', 'first_seen', 'last_seen', 'registered_at')
     ordering = ('-first_seen',)
     inlines = [RegistrationSessionInline]
-    actions = ['mark_as_blocked', 'mark_as_unblocked']
+    actions = ['export_csv', 'mark_as_blocked', 'mark_as_unblocked', 'reset_registrations']
+
+    # ── Stats for changelist template ──────────────────────────────────────────
+    def changelist_view(self, request, extra_context=None):
+        from django.utils import timezone as tz
+        today = tz.localdate()
+        total     = BotUser.objects.count()
+        registered = BotUser.objects.filter(is_registered=True).count()
+        blocked   = BotUser.objects.filter(is_blocked=True).count()
+        in_progress = (
+            RegistrationSession.objects.filter(is_completed=False).count()
+        )
+        today_count = BotUser.objects.filter(
+            registered_at__date=today, is_registered=True
+        ).count()
+        completion_rate = round(registered / total * 100) if total else None
+        extra_context = extra_context or {}
+        extra_context['stats'] = {
+            'total': total,
+            'registered': registered,
+            'blocked': blocked,
+            'in_progress': in_progress,
+            'today': today_count,
+            'completion_rate': completion_rate,
+        }
+        return super().changelist_view(request, extra_context=extra_context)
     fieldsets = (
         ('اطلاعات بله', {
             'fields': ('bale_user_id', 'username', 'first_name', 'last_name'),
@@ -182,31 +272,64 @@ class BotUserAdmin(admin.ModelAdmin):
     )
 
     def full_name_display(self, obj):
-        return obj.full_name or f'User_{obj.bale_user_id}'
+        name = obj.full_name or f'User_{obj.bale_user_id}'
+        return format_html('<strong>{}</strong>', name)
     full_name_display.short_description = 'نام کامل'
+    full_name_display.admin_order_field = 'first_name'
 
     def username_display(self, obj):
         if obj.username:
-            return format_html('<code>@{}</code>', obj.username)
-        return '—'
+            return format_html('<code style="font-size:0.9em">@{}</code>', obj.username)
+        return format_html('<span style="color:#adb5bd">—</span>')
     username_display.short_description = 'نام کاربری'
 
     def is_registered_badge(self, obj):
         if obj.is_registered:
-            return format_html('<span style="color:#198754;font-size:1.1em">✅</span>')
-        return format_html('<span style="color:#dc3545;font-size:1.1em">⏳</span>')
-    is_registered_badge.short_description = 'ثبت‌نام'
+            return format_html('<span style="color:#198754;font-weight:600">✅ ثبت‌نام شده</span>')
+        return format_html('<span style="color:#fd7e14;font-weight:600">⏳ ناتمام</span>')
+    is_registered_badge.short_description = 'وضعیت ثبت‌نام'
     is_registered_badge.admin_order_field = 'is_registered'
 
-    @admin.action(description='بلاک کردن کاربران انتخابی')
-    def mark_as_blocked(self, request, queryset):
-        updated = queryset.update(is_blocked=True)
-        self.message_user(request, f'{updated} کاربر بلاک شد.')
+    # ── Custom URL: export ALL users ──────────────────────────────────────────
+    def get_urls(self):
+        from django.urls import path
+        urls = super().get_urls()
+        return [
+            path(
+                'export-all-csv/',
+                self.admin_site.admin_view(self.export_all_csv),
+                name='registration_botuser_export_all_csv',
+            ),
+        ] + urls
 
-    @admin.action(description='رفع بلاک کاربران انتخابی')
+    def export_all_csv(self, request):
+        return _export_users_csv(BotUser.objects.select_related('session').order_by('-registered_at'))
+
+    # ── Actions ───────────────────────────────────────────────────────────────
+    @admin.action(description='📥 خروجی CSV (کاربران انتخابی)')
+    def export_csv(self, request, queryset):
+        return _export_users_csv(queryset.select_related('session'))
+
+    @admin.action(description='⛔ بلاک کردن کاربران انتخابی')
+    def mark_as_blocked(self, request, queryset):
+        n = queryset.update(is_blocked=True)
+        self.message_user(request, f'{n} کاربر بلاک شد.', django_messages.WARNING)
+
+    @admin.action(description='✅ رفع بلاک کاربران انتخابی')
     def mark_as_unblocked(self, request, queryset):
-        updated = queryset.update(is_blocked=False)
-        self.message_user(request, f'{updated} کاربر از بلاک خارج شد.')
+        n = queryset.update(is_blocked=False)
+        self.message_user(request, f'{n} کاربر از بلاک خارج شد.', django_messages.SUCCESS)
+
+    @admin.action(description='🔄 ریست ثبت‌نام (شروع مجدد)')
+    def reset_registrations(self, request, queryset):
+        user_ids = list(queryset.values_list('pk', flat=True))
+        deleted, _ = RegistrationSession.objects.filter(user_id__in=user_ids).delete()
+        queryset.update(is_registered=False, registered_at=None)
+        self.message_user(
+            request,
+            f'ثبت‌نام {len(user_ids)} کاربر ریست شد ({deleted} جلسه حذف شد).',
+            django_messages.WARNING,
+        )
 
 
 # ─── RegistrationSession ──────────────────────────────────────────────────────
@@ -214,57 +337,65 @@ class BotUserAdmin(admin.ModelAdmin):
 @admin.register(RegistrationSession)
 class RegistrationSessionAdmin(admin.ModelAdmin):
     list_display = (
-        'user', 'current_question_index', 'is_completed_badge',
+        'user', 'progress_display', 'is_completed_badge',
         'started_at', 'completed_at',
     )
     list_filter = ('is_completed', 'started_at')
-    search_fields = ('user__first_name', 'user__last_name', 'user__username', 'user__bale_user_id')
+    search_fields = (
+        'user__first_name', 'user__last_name',
+        'user__username', 'user__bale_user_id',
+    )
     readonly_fields = ('user', 'started_at', 'completed_at', 'answers_table')
     ordering = ('-started_at',)
     fieldsets = (
-        ('کاربر', {
-            'fields': ('user',),
-        }),
+        ('کاربر', {'fields': ('user',)}),
         ('وضعیت', {
             'fields': ('current_question_index', 'is_completed', 'started_at', 'completed_at'),
         }),
-        ('پاسخ‌ها', {
-            'fields': ('answers_table',),
-        }),
-        ('داده خام', {
-            'fields': ('answers',),
-            'classes': ('collapse',),
-        }),
+        ('پاسخ‌ها', {'fields': ('answers_table',)}),
+        ('داده خام', {'fields': ('answers',), 'classes': ('collapse',)}),
     )
+
+    def progress_display(self, obj):
+        total = Question.objects.filter(is_active=True).count()
+        answered = min(obj.current_question_index, total)
+        if total == 0:
+            return '—'
+        pct = int(answered / total * 100)
+        color = '#198754' if obj.is_completed else '#0d6efd'
+        return mark_safe(
+            f'<div style="display:flex;align-items:center;gap:8px">'
+            f'<div style="background:#e9ecef;border-radius:8px;height:12px;'
+            f'width:100px;overflow:hidden">'
+            f'<div style="background:{color};height:100%;width:{pct}%"></div></div>'
+            f'<small style="color:{color}">{answered}/{total}</small></div>'
+        )
+    progress_display.short_description = 'پیشرفت'
 
     def is_completed_badge(self, obj):
         if obj.is_completed:
-            return format_html('<span style="color:#198754;font-weight:bold">✅ تکمیل</span>')
-        return format_html('<span style="color:#fd7e14;font-weight:bold">⏳ در حال انجام</span>')
+            return format_html('<span style="color:#198754;font-weight:600">✅ تکمیل</span>')
+        return format_html('<span style="color:#fd7e14;font-weight:600">⏳ در حال انجام</span>')
     is_completed_badge.short_description = 'وضعیت'
     is_completed_badge.admin_order_field = 'is_completed'
 
     def answers_table(self, obj):
         if not obj.answers:
-            return 'هیچ پاسخی ثبت نشده است'
-        # Get question labels
-        from .models import Question
+            return mark_safe('<p style="color:#6c757d">هیچ پاسخی ثبت نشده است.</p>')
         questions = {q.field_name: q.text for q in Question.objects.all()}
-        rows = ''
-        for field_name, answer in obj.answers.items():
-            label = questions.get(field_name, field_name)
-            rows += (
-                f'<tr>'
-                f'<td style="padding:6px 12px;border:1px solid #dee2e6;font-weight:bold">{label}</td>'
-                f'<td style="padding:6px 12px;border:1px solid #dee2e6">{answer}</td>'
-                f'</tr>'
-            )
+        rows = ''.join(
+            f'<tr>'
+            f'<td style="padding:7px 12px;border:1px solid #dee2e6;background:#f8f9fa;'
+            f'font-weight:600;width:40%">{questions.get(k, k)}</td>'
+            f'<td style="padding:7px 12px;border:1px solid #dee2e6">{v}</td>'
+            f'</tr>'
+            for k, v in obj.answers.items()
+        )
         return mark_safe(
-            f'<table style="border-collapse:collapse;width:100%;margin-top:8px">'
+            f'<table style="border-collapse:collapse;width:100%;margin-top:6px">'
             f'<thead><tr>'
-            f'<th style="padding:6px 12px;border:1px solid #dee2e6;background:#f8f9fa">سوال</th>'
-            f'<th style="padding:6px 12px;border:1px solid #dee2e6;background:#f8f9fa">پاسخ کاربر</th>'
-            f'</tr></thead>'
-            f'<tbody>{rows}</tbody></table>'
+            f'<th style="padding:7px 12px;border:1px solid #dee2e6;background:#e9ecef">سوال</th>'
+            f'<th style="padding:7px 12px;border:1px solid #dee2e6;background:#e9ecef">پاسخ کاربر</th>'
+            f'</tr></thead><tbody>{rows}</tbody></table>'
         )
     answers_table.short_description = 'جدول پاسخ‌ها'
