@@ -73,7 +73,7 @@ class QuestionAdmin(admin.ModelAdmin):
 
 @admin.register(FinalMessage)
 class FinalMessageAdmin(admin.ModelAdmin):
-    list_display = ('title', 'message_type_badge', 'is_active_badge', 'updated_at')
+    list_display = ('title', 'message_type_badge', 'updated_at')
     list_display_links = ('title',)
     list_filter = ('message_type', 'is_active')
     search_fields = ('title', 'text_content')
@@ -111,12 +111,6 @@ class FinalMessageAdmin(admin.ModelAdmin):
             color, obj.get_message_type_display(),
         )
     message_type_badge.short_description = 'نوع پیام'
-
-    def is_active_badge(self, obj):
-        if obj.is_active:
-            return format_html('<span style="color:#198754;font-size:1.2em">✅ فعال</span>')
-        return format_html('<span style="color:#dc3545;font-size:1.2em">❌ غیرفعال</span>')
-    is_active_badge.short_description = 'وضعیت'
 
     def content_preview(self, obj):
         parts = []

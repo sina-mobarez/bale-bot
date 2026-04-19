@@ -30,10 +30,10 @@ def _make_bot():
     file_url = getattr(settings, 'BALE_FILE_BASE_URL', '')
 
     # Only override URL if explicitly set to something non-default
-    if base_url and base_url != 'https://tapi.bale.ai/bot':
-        apihelper.API_URL = base_url.rstrip('/') + '/{0}/{1}'
-    if file_url and file_url != 'https://tapi.bale.ai/file/bot':
-        apihelper.FILE_URL = file_url.rstrip('/') + '/{0}/{1}'
+    if base_url and base_url == 'https://tapi.bale.ai/bot':
+        apihelper.API_URL = base_url.rstrip('/') + '{0}/{1}'
+    if file_url and file_url == 'https://tapi.bale.ai/file/bot':
+        apihelper.FILE_URL = file_url.rstrip('/') + '{0}/{1}'
 
     bot = telebot.TeleBot(
         token,
