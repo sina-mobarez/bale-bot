@@ -215,7 +215,7 @@ def _export_users_csv(queryset):
 class BotUserAdmin(admin.ModelAdmin):
     list_display = (
         'full_name_display', 'bale_user_id', 'username_display',
-        'is_registered_badge', 'is_blocked', 'first_seen', 'last_seen',
+        'is_blocked', 'first_seen', 'last_seen',
     )
     list_display_links = ('full_name_display', 'bale_user_id')
     list_filter = ('is_registered', 'is_blocked', 'first_seen')
@@ -277,13 +277,6 @@ class BotUserAdmin(admin.ModelAdmin):
         return format_html('<span style="color:#adb5bd">—</span>')
     username_display.short_description = 'نام کاربری'
 
-    def is_registered_badge(self, obj):
-        if obj.is_registered:
-            return format_html('<span style="color:#198754;font-weight:600">✅ ثبت‌نام شده</span>')
-        return format_html('<span style="color:#fd7e14;font-weight:600">⏳ ناتمام</span>')
-    is_registered_badge.short_description = 'وضعیت ثبت‌نام'
-    is_registered_badge.admin_order_field = 'is_registered'
-
     # ── Custom URL: export ALL users ──────────────────────────────────────────
     def get_urls(self):
         from django.urls import path
@@ -331,7 +324,7 @@ class BotUserAdmin(admin.ModelAdmin):
 @admin.register(RegistrationSession)
 class RegistrationSessionAdmin(admin.ModelAdmin):
     list_display = (
-        'user', 'progress_display', 'is_completed_badge',
+        'user', 'progress_display',
         'started_at', 'completed_at',
     )
     list_filter = ('is_completed', 'started_at')
@@ -365,13 +358,6 @@ class RegistrationSessionAdmin(admin.ModelAdmin):
             f'<small style="color:{color}">{answered}/{total}</small></div>'
         )
     progress_display.short_description = 'پیشرفت'
-
-    def is_completed_badge(self, obj):
-        if obj.is_completed:
-            return format_html('<span style="color:#198754;font-weight:600">✅ تکمیل</span>')
-        return format_html('<span style="color:#fd7e14;font-weight:600">⏳ در حال انجام</span>')
-    is_completed_badge.short_description = 'وضعیت'
-    is_completed_badge.admin_order_field = 'is_completed'
 
     def answers_table(self, obj):
         if not obj.answers:
