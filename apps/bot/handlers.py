@@ -82,14 +82,19 @@ def _get_or_create_session(bot_user):
     return session
 
 
+def _get_active_welcome_message():
+    from apps.registration.models import WelcomeMessage
+    return WelcomeMessage.objects.filter(is_active=True).first()
+
+
 def _get_active_questions():
     from apps.registration.models import Question
     return list(Question.objects.filter(is_active=True).order_by('order'))
 
 
-def _get_active_final_message():
+def _get_active_final_messages():
     from apps.registration.models import FinalMessage
-    return FinalMessage.objects.filter(is_active=True).first()
+    return list(FinalMessage.objects.filter(is_active=True).order_by('order'))
 
 
 def _save_answer(session, field_name: str, answer: str, next_index: int):
@@ -254,13 +259,15 @@ def send_final_message(bot: telebot.TeleBot, chat_id: int, final_msg):
                 bot.send_message(chat_id, f'{text}\n\n{final_msg.link_url}', parse_mode='Markdown')
 
         elif mt == FinalMessage.MessageType.TEXT_AND_FILE:
-            if final_msg.text_content:
-                bot.send_message(chat_id, final_msg.text_content, parse_mode='Markdown')
-            if final_msg.file:
+            if final_msg.file and final_msg.text_content:
                 with open(final_msg.file.path, 'rb') as f:
-                    bot.send_document(chat_id, f,
+                    bot.send_document(chat_id, f, caption=final_msg.text_content, parse_mode='Markdown',
                                       visible_file_name=os.path.basename(final_msg.file.name))
-
+            elif final_msg.file:
+                with open(final_msg.file.path, 'rb') as f:
+                    bot.send_document(chat_id, f, visible_file_name=os.path.basename(final_msg.file.name))
+            elif final_msg.text_content:
+                bot.send_message(chat_id, final_msg.text_content, parse_mode='Markdown')
         elif mt == FinalMessage.MessageType.TEXT_AND_LINK:
             text = final_msg.text_content or final_msg.link_url
             markup = None
@@ -306,14 +313,22 @@ def register_handlers(bot: telebot.TeleBot):
             return
 
         first_name = tg_user.first_name or 'کاربر'
-        bot.send_message(
-            chat_id,
-            f'سلام {first_name}! 👋\n\n'
-            f'به فرآیند ثبت‌نام خوش آمدید.\n'
-            f'لطفاً به سوالات زیر پاسخ دهید.\n\n'
-            f'برای لغو هر زمان /cancel را ارسال کنید.',
-            reply_markup=remove_keyboard(),
-        )
+        
+        # Send welcome message from database
+        welcome_msg = _get_active_welcome_message()
+        if welcome_msg:
+            bot.send_message(chat_id, welcome_msg.text, parse_mode='Markdown', reply_markup=remove_keyboard())
+        else:
+            # Fallback if no welcome message is configured
+            bot.send_message(
+                chat_id,
+                f'سلام {first_name}! 👋\n\n'
+                f'به فرآیند ثبت‌نام خوش آمدید.\n'
+                f'لطفاً به سوالات زیر پاسخ دهید.\n\n'
+                f'برای لغو هر زمان /cancel را ارسال کنید.',
+                reply_markup=remove_keyboard(),
+            )
+        
         idx = session.current_question_index
         send_question(bot, chat_id, questions[idx])
 
@@ -392,9 +407,10 @@ def register_handlers(bot: telebot.TeleBot):
                 '🎉 ثبت‌نام شما با موفقیت انجام شد!\n\nدر حال آماده‌سازی اطلاعات...',
                 reply_markup=remove_keyboard(),
             )
-            final_msg = _get_active_final_message()
-            if final_msg:
-                send_final_message(bot, chat_id, final_msg)
+            final_messages = _get_active_final_messages()
+            if final_messages:
+                for final_msg in final_messages:
+                    send_final_message(bot, chat_id, final_msg)
             else:
                 bot.send_message(chat_id, '✅ ثبت‌نام کامل شد. با تشکر!')
 

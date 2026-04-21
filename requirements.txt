@@ -9,3 +9,6 @@ gunicorn
 django-jalali
 asgiref
 httpx
+celery
+redis
+django-celery-beat

@@ -2,6 +2,7 @@
 Registration app models.
 
 Models:
+  - WelcomeMessage : Welcome message sent when user starts the bot
   - Question       : A question asked during registration (ordered, typed)
   - FinalMessage   : What is sent to the user after successful registration
   - BotUser        : A Bale user who interacted with the bot
@@ -11,6 +12,44 @@ import os
 from django.db import models
 from django.utils import timezone
 from django.core.validators import FileExtensionValidator
+
+
+class WelcomeMessage(models.Model):
+    """
+    The welcome message sent when a user starts the bot with /start.
+    Only ONE instance should be active at a time.
+    """
+    title = models.CharField(
+        verbose_name='عنوان (داخلی)',
+        max_length=200,
+        help_text='فقط برای مدیریت داخلی — کاربر نمی‌بیند',
+    )
+    text = models.TextField(
+        verbose_name='متن خوش‌آمدگویی',
+        help_text='از Markdown پشتیبانی می‌شود (*bold*, _italic_, etc.)',
+    )
+    is_active = models.BooleanField(
+        verbose_name='فعال',
+        default=True,
+        help_text='فقط یک پیام می‌تواند فعال باشد',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'پیام خوش‌آمدگویی'
+        verbose_name_plural = 'پیام‌های خوش‌آمدگویی'
+        ordering = ['-updated_at']
+
+    def __str__(self):
+        status = '✅ فعال' if self.is_active else '❌ غیرفعال'
+        return f'{self.title} ({status})'
+
+    def save(self, *args, **kwargs):
+        """Ensure only one WelcomeMessage is active at a time."""
+        if self.is_active:
+            WelcomeMessage.objects.exclude(pk=self.pk).update(is_active=False)
+        super().save(*args, **kwargs)
 
 
 class Question(models.Model):
@@ -86,8 +125,8 @@ def final_message_upload_to(instance, filename):
 
 class FinalMessage(models.Model):
     """
-    The message sent to the user after successful registration.
-    Only ONE instance should be active at a time.
+    Messages sent to the user after successful registration.
+    Multiple messages can be active and will be sent in order.
     """
 
     class MessageType(models.TextChoices):
@@ -98,6 +137,11 @@ class FinalMessage(models.Model):
         TEXT_AND_FILE = 'text_file', 'متن + فایل'
         TEXT_AND_LINK = 'text_link', 'متن + لینک'
 
+    order = models.PositiveSmallIntegerField(
+        verbose_name='ترتیب',
+        default=1,
+        help_text='پیام‌ها بر اساس این عدد به ترتیب ارسال می‌شوند',
+    )
     title = models.CharField(
         verbose_name='عنوان (داخلی)',
         max_length=200,
@@ -149,17 +193,12 @@ class FinalMessage(models.Model):
     class Meta:
         verbose_name = 'پیام نهایی'
         verbose_name_plural = 'پیام‌های نهایی'
-        ordering = ['-updated_at']
+        ordering = ['order', '-updated_at']
 
     def __str__(self):
         status = '✅ فعال' if self.is_active else '❌ غیرفعال'
         return f'{self.title} ({status})'
 
-    def save(self, *args, **kwargs):
-        """Ensure only one FinalMessage is active at a time."""
-        if self.is_active:
-            FinalMessage.objects.exclude(pk=self.pk).update(is_active=False)
-        super().save(*args, **kwargs)
 
 
 class BotUser(models.Model):
@@ -236,3 +275,62 @@ class RegistrationSession(models.Model):
         for k, v in self.answers.items():
             lines.append(f'{k}: {v}')
         return '\n'.join(lines)
+
+
+class ScheduledMessage(models.Model):
+    """
+    A message that will be sent to all registered users at a specific time.
+    """
+
+    class MessageType(models.TextChoices):
+        TEXT = 'text', 'پیام متنی'
+        FILE = 'file', 'فایل / سند'
+        PHOTO = 'photo', 'تصویر'
+        LINK = 'link', 'لینک'
+
+    title = models.CharField(
+        verbose_name='عنوان',
+        max_length=200,
+        help_text='عنوان داخلی برای مدیریت',
+    )
+    message_type = models.CharField(
+        verbose_name='نوع پیام',
+        max_length=20,
+        choices=MessageType.choices,
+        default=MessageType.TEXT,
+    )
+    text_content = models.TextField(
+        verbose_name='متن پیام',
+        blank=True,
+        help_text='از Markdown پشتیبانی می‌شود',
+    )
+    file = models.FileField(
+        verbose_name='فایل',
+        upload_to='scheduled_messages/',
+        blank=True,
+        null=True,
+    )
+    photo = models.ImageField(
+        verbose_name='تصویر',
+        upload_to='scheduled_messages/photos/',
+        blank=True,
+        null=True,
+    )
+    link_url = models.URLField(verbose_name='آدرس لینک', blank=True)
+    link_text = models.CharField(verbose_name='متن دکمه لینک', max_length=200, blank=True)
+    scheduled_time = models.DateTimeField(
+        verbose_name='زمان ارسال',
+        help_text='پیام در این زمان به همه کاربران ثبت‌نام شده ارسال می‌شود',
+    )
+    is_sent = models.BooleanField(verbose_name='ارسال شده', default=False, db_index=True)
+    sent_at = models.DateTimeField(verbose_name='زمان ارسال واقعی', null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'پیام زمان‌بندی شده'
+        verbose_name_plural = 'پیام‌های زمان‌بندی شده'
+        ordering = ['scheduled_time']
+
+    def __str__(self):
+        status = '✅ ارسال شده' if self.is_sent else '⏳ در انتظار'
+        return f'{self.title} — {self.scheduled_time.strftime("%Y-%m-%d %H:%M")} ({status})'

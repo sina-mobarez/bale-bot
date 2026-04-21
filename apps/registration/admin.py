@@ -9,7 +9,7 @@ from django.utils.html import format_html
 from django.utils.safestring import mark_safe
 from django.utils import timezone
 
-from .models import Question, FinalMessage, BotUser, RegistrationSession
+from .models import Question, FinalMessage, BotUser, RegistrationSession, WelcomeMessage, ScheduledMessage
 
 
 # ─── Question ─────────────────────────────────────────────────────────────────
@@ -69,18 +69,51 @@ class QuestionAdmin(admin.ModelAdmin):
     question_type_badge.short_description = 'نوع'
 
 
+# ─── WelcomeMessage ───────────────────────────────────────────────────────────
+
+@admin.register(WelcomeMessage)
+class WelcomeMessageAdmin(admin.ModelAdmin):
+    list_display = ('title', 'is_active_badge', 'updated_at')
+    list_display_links = ('title',)
+    list_filter = ('is_active',)
+    search_fields = ('title', 'text')
+    readonly_fields = ('created_at', 'updated_at', 'text_preview')
+    fieldsets = (
+        ('اطلاعات اصلی', {
+            'fields': ('title', 'is_active'),
+        }),
+        ('محتوا', {
+            'fields': ('text', 'text_preview'),
+        }),
+        ('اطلاعات سیستمی', {
+            'fields': ('created_at', 'updated_at'),
+            'classes': ('collapse',),
+        }),
+    )
+
+    def is_active_badge(self, obj):
+        color = '#198754' if obj.is_active else '#6c757d'
+        text = '✅ فعال' if obj.is_active else '❌ غیرفعال'
+        return format_html('<span style="color:{}">{}</span>', color, text)
+    is_active_badge.short_description = 'وضعیت'
+
+    def text_preview(self, obj):
+        return format_html('<div style="background:#f8f9fa;padding:8px 12px;border-radius:6px;border-left:3px solid #0d6efd">{}</div>', obj.text[:500])
+    text_preview.short_description = 'پیش‌نمایش'
+
 # ─── FinalMessage ─────────────────────────────────────────────────────────────
 
 @admin.register(FinalMessage)
 class FinalMessageAdmin(admin.ModelAdmin):
-    list_display = ('title', 'message_type_badge', 'updated_at')
+    list_display = ('order_badge', 'title', 'message_type_badge', 'is_active_badge', 'updated_at')
     list_display_links = ('title',)
+    list_editable = ('is_active',)
     list_filter = ('message_type', 'is_active')
     search_fields = ('title', 'text_content')
     readonly_fields = ('created_at', 'updated_at', 'content_preview')
     fieldsets = (
         ('اطلاعات اصلی', {
-            'fields': ('title', 'message_type', 'is_active'),
+            'fields': ('order', 'title', 'message_type', 'is_active'),
         }),
         ('محتوا', {
             'fields': ('text_content', 'file', 'photo', 'link_url', 'link_text'),
@@ -94,6 +127,21 @@ class FinalMessageAdmin(admin.ModelAdmin):
             'classes': ('collapse',),
         }),
     )
+
+    def order_badge(self, obj):
+        return format_html(
+            '<span style="background:#0d6efd;color:#fff;padding:2px 10px;'
+            'border-radius:12px;font-weight:bold;font-size:0.9em">{}</span>',
+            obj.order,
+        )
+    order_badge.short_description = 'ترتیب'
+    order_badge.admin_order_field = 'order'
+
+    def is_active_badge(self, obj):
+        color = '#198754' if obj.is_active else '#6c757d'
+        text = '✅' if obj.is_active else '❌'
+        return format_html('<span style="color:{}">{}</span>', color, text)
+    is_active_badge.short_description = 'فعال'
 
     def message_type_badge(self, obj):
         colors = {
@@ -134,6 +182,113 @@ class FinalMessageAdmin(admin.ModelAdmin):
             )
         return mark_safe(''.join(parts) or '<p style="color:#6c757d">محتوایی تنظیم نشده</p>')
     content_preview.short_description = 'پیش‌نمایش'
+
+
+# ─── ScheduledMessage ─────────────────────────────────────────────────────────
+
+@admin.register(ScheduledMessage)
+class ScheduledMessageAdmin(admin.ModelAdmin):
+    list_display = ('title', 'message_type_badge', 'scheduled_time', 'status_badge', 'sent_at')
+    list_display_links = ('title',)
+    list_filter = ('message_type', 'is_sent', 'scheduled_time')
+    search_fields = ('title', 'text_content')
+    readonly_fields = ('is_sent', 'sent_at', 'created_at', 'content_preview')
+    date_hierarchy = 'scheduled_time'
+    fieldsets = (
+        ('اطلاعات اصلی', {
+            'fields': ('title', 'message_type', 'scheduled_time'),
+        }),
+        ('محتوا', {
+            'fields': ('text_content', 'file', 'photo', 'link_url', 'link_text'),
+            'description': 'بسته به نوع پیام فیلدهای مربوطه را پر کنید.',
+        }),
+        ('پیش‌نمایش', {
+            'fields': ('content_preview',),
+        }),
+        ('وضعیت ارسال', {
+            'fields': ('is_sent', 'sent_at'),
+            'classes': ('collapse',),
+        }),
+        ('اطلاعات سیستمی', {
+            'fields': ('created_at',),
+            'classes': ('collapse',),
+        }),
+    )
+    
+    actions = ['send_now']
+
+    def message_type_badge(self, obj):
+        colors = {
+            'text':  '#0d6efd',
+            'file':  '#fd7e14',
+            'photo': '#198754',
+            'link':  '#6f42c1',
+        }
+        color = colors.get(obj.message_type, '#6c757d')
+        return format_html(
+            '<span style="background:{};color:#fff;padding:2px 10px;'
+            'border-radius:12px;font-size:0.85em">{}</span>',
+            color, obj.get_message_type_display(),
+        )
+    message_type_badge.short_description = 'نوع پیام'
+
+    def status_badge(self, obj):
+        if obj.is_sent:
+            return format_html(
+                '<span style="background:#198754;color:#fff;padding:2px 10px;'
+                'border-radius:12px;font-size:0.85em">✅ ارسال شده</span>'
+            )
+        elif obj.scheduled_time <= timezone.now():
+            return format_html(
+                '<span style="background:#dc3545;color:#fff;padding:2px 10px;'
+                'border-radius:12px;font-size:0.85em">⏰ در حال ارسال...</span>'
+            )
+        else:
+            return format_html(
+                '<span style="background:#ffc107;color:#000;padding:2px 10px;'
+                'border-radius:12px;font-size:0.85em">⏳ در انتظار</span>'
+            )
+    status_badge.short_description = 'وضعیت'
+
+    def content_preview(self, obj):
+        parts = []
+        if obj.text_content:
+            parts.append(
+                f'<div style="background:#f8f9fa;padding:8px 12px;border-radius:6px;'
+                f'border-left:3px solid #0d6efd;margin-bottom:8px">'
+                f'<strong>متن:</strong><br>{obj.text_content[:300]}</div>'
+            )
+        if obj.link_url:
+            parts.append(f'<p><strong>لینک:</strong> <a href="{obj.link_url}" target="_blank">{obj.link_text or obj.link_url}</a></p>')
+        if obj.file:
+            parts.append(f'<p>📎 <strong>فایل:</strong> {obj.file.name.split("/")[-1]}</p>')
+        if obj.photo:
+            parts.append(f'<p><img src="{obj.photo.url}" style="max-height:120px;border-radius:6px;border:1px solid #dee2e6"></p>')
+        return mark_safe(''.join(parts) or '<p style="color:#6c757d">محتوایی تنظیم نشده</p>')
+    content_preview.short_description = 'پیش‌نمایش'
+
+    def send_now(self, request, queryset):
+        """Admin action to send selected messages immediately."""
+        from apps.registration.tasks import send_scheduled_messages
+        
+        # Update scheduled_time to now for selected messages
+        count = queryset.filter(is_sent=False).update(scheduled_time=timezone.now())
+        
+        if count > 0:
+            # Trigger the Celery task
+            send_scheduled_messages.delay()
+            self.message_user(
+                request,
+                f'{count} پیام برای ارسال فوری آماده شد. ارسال در حال انجام است...',
+                level=django_messages.SUCCESS
+            )
+        else:
+            self.message_user(
+                request,
+                'هیچ پیام ارسال نشده‌ای برای ارسال فوری وجود ندارد.',
+                level=django_messages.WARNING
+            )
+    send_now.short_description = '📤 ارسال فوری پیام‌های انتخاب شده'
 
 
 # ─── BotUser ──────────────────────────────────────────────────────────────────
