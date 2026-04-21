@@ -107,7 +107,6 @@ class WelcomeMessageAdmin(admin.ModelAdmin):
 class FinalMessageAdmin(admin.ModelAdmin):
     list_display = ('order_badge', 'title', 'message_type_badge', 'is_active_badge', 'updated_at')
     list_display_links = ('title',)
-    list_editable = ('is_active',)
     list_filter = ('message_type', 'is_active')
     search_fields = ('title', 'text_content')
     readonly_fields = ('created_at', 'updated_at', 'content_preview')
