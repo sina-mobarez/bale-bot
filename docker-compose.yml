@@ -18,6 +18,39 @@ services:
       timeout: 5s
       retries: 10
 
+  # ── Redis ────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    env_file:
+      - .env
+    command:
+      - redis-server
+      - --maxmemory
+      - 512mb
+      - --maxmemory-policy
+      - allkeys-lru
+      - --save
+      - "900"
+      - "1"
+      - --save
+      - "300"
+      - "10"
+      - --save
+      - "60"
+      - "10000"
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   # ── Django Admin Web Server ─────────────────────────────────────────────────
   web:
     build: .
@@ -56,6 +89,44 @@ services:
       db:
         condition: service_healthy
       web:
+        condition: service_healthy
+
+  # ── Bale Celery Process ────────────────────────────────────────────────────────
+  celery:
+    build: .
+    restart: unless-stopped
+    command: celery
+    volumes:
+      - .:/app
+      - media_data:/app/media
+      - logs_data:/app/logs
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # ── Bale Celery Process ────────────────────────────────────────────────────────
+  beat:
+    build: .
+    restart: unless-stopped
+    command: beat
+    volumes:
+      - .:/app
+      - media_data:/app/media
+      - logs_data:/app/logs
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
   # ── Nginx (optional, uncomment for production with HTTPS) ──────────────────

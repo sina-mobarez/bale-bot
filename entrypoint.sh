@@ -63,6 +63,14 @@ case "$1" in
     echo "Starting Bale bot..."
     exec python manage.py runbot
     ;;
+  celery)
+    echo "Starting Bale celery..."
+    exec celery -A config worker --loglevel=info
+    ;;
+  beat)
+    echo "Starting Bale beat..."
+    exec celery -A config beat --loglevel=info --scheduler django_celery_beat.schedulers:DatabaseScheduler
+    ;;
   *)
     exec "$@"
     ;;
