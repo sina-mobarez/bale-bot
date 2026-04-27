@@ -402,11 +402,6 @@ def register_handlers(bot: telebot.TeleBot):
         if next_idx >= len(questions):
             _complete_session(session, bot_user)
             logger.info(f'User {tg_user.id} completed registration')
-            bot.send_message(
-                chat_id,
-                '🎉 ثبت‌نام شما با موفقیت انجام شد!\n\nدر حال آماده‌سازی اطلاعات...',
-                reply_markup=remove_keyboard(),
-            )
             final_messages = _get_active_final_messages()
             if final_messages:
                 for final_msg in final_messages:
