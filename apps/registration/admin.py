@@ -335,12 +335,11 @@ def _export_users_csv(queryset):
     field_names = [q.field_name for q in questions]
     q_labels = {q.field_name: q.text[:40] for q in questions}
 
-    response = HttpResponse(content_type='text/csv; charset=utf-8-sig')
-    ts = timezone.now().strftime('%Y%m%d_%H%M%S')
-    response['Content-Disposition'] = f'attachment; filename="registrations_{ts}.csv"'
-    response.write('\ufeff')  # BOM for Excel
-
-    writer = csv.writer(response)
+    # Build in a StringIO buffer, then encode once with BOM.
+    # Writing directly to HttpResponse with charset=utf-8-sig would prepend
+    # BOM on every write() call — encoding once avoids that bug.
+    buf = io.StringIO()
+    writer = csv.writer(buf)
     writer.writerow(
         ['شناسه بله', 'نام کاربری', 'نام', 'نام خانوادگی',
          'ثبت‌نام شده', 'زمان ثبت‌نام', 'اولین بازدید']
@@ -365,6 +364,13 @@ def _export_users_csv(queryset):
             ]
             + [answers.get(f, '—') for f in field_names]
         )
+
+    ts = timezone.now().strftime('%Y%m%d_%H%M%S')
+    response = HttpResponse(
+        buf.getvalue().encode('utf-8-sig'),
+        content_type='text/csv; charset=utf-8-sig',
+    )
+    response['Content-Disposition'] = f'attachment; filename="registrations_{ts}.csv"'
     return response
 
 
@@ -376,14 +382,23 @@ def _import_users_csv(csv_file):
     """
     from apps.registration.models import RegistrationSession
     raw = csv_file.read()
-    # Try UTF-8 with BOM first, then plain UTF-8
+    # Strip all leading BOMs (old exports had triple BOM due to a bug)
+    while raw.startswith(b'\xef\xbb\xbf'):
+        raw = raw[3:]
     try:
-        text = raw.decode('utf-8-sig')
+        text = raw.decode('utf-8')
     except UnicodeDecodeError:
         text = raw.decode('utf-8', errors='replace')
+    # Remove any BOM characters embedded mid-content (one per row in old exports)
+    text = text.replace('﻿', '')
 
     reader = csv.DictReader(io.StringIO(text))
-    headers = reader.fieldnames or []
+    # Normalise headers: strip whitespace and embedded newlines
+    raw_headers = list(reader.fieldnames or [])
+    clean_headers = [h.replace('\r\n', ' ').replace('\n', ' ').strip() for h in raw_headers]
+    # Remap the reader's fieldnames to cleaned versions
+    reader.fieldnames = clean_headers
+    headers = clean_headers
 
     # Map Persian column names to model fields
     col_map = {
@@ -397,7 +412,11 @@ def _import_users_csv(csv_file):
     answer_cols = [h for h in headers if h not in meta_cols]
 
     # Build field_name map from question labels → field_name
-    questions = {q.text[:40]: q.field_name for q in Question.objects.filter(is_active=True)}
+    # Also normalise question text the same way (strip newlines, truncate to 40)
+    questions = {
+        q.text[:40].replace('\r\n', ' ').replace('\n', ' ').strip(): q.field_name
+        for q in Question.objects.filter(is_active=True)
+    }
 
     created = updated = 0
     errors = []

@@ -1,5 +1,5 @@
 {% extends "admin/base_site.html" %}
-{% load i18n %}
+{% load i18n admin_urls %}
 
 {% block title %}وارد کردن کاربران از CSV{% endblock %}
 
@@ -35,8 +35,8 @@
                            border-radius:4px;cursor:pointer;font-size:1em">
                 📥 شروع وارد کردن
             </button>
-            <a href="{{ opts|admin_urlname:'changelist' }}"
-               style="background:#6c757d;color:#fff;border:none;padding:10px 24px;
+            <a href="{% url 'admin:registration_botuser_changelist' %}"
+               style="background:#6c757d;color:#fff;padding:10px 24px;
                       border-radius:4px;text-decoration:none;font-size:1em">
                 انصراف
             </a>
