@@ -22,27 +22,8 @@ logger = logging.getLogger(__name__)
 
 def _make_bot():
     """Create and return a configured TeleBot instance."""
-    import telebot
-    from telebot import apihelper
-
-    token = settings.BALE_BOT_TOKEN
-    base_url = getattr(settings, 'BALE_API_BASE_URL', '')
-    file_url = getattr(settings, 'BALE_FILE_BASE_URL', '')
-
-    # Only override URL if explicitly set to something non-default
-    if base_url and base_url == 'https://tapi.bale.ai/bot':
-        apihelper.API_URL = base_url.rstrip('/') + '{0}/{1}'
-    if file_url and file_url == 'https://tapi.bale.ai/file/bot':
-        apihelper.FILE_URL = file_url.rstrip('/') + '{0}/{1}'
-
-    bot = telebot.TeleBot(
-        token,
-        parse_mode=None,
-        threaded=True,
-        skip_pending=True,
-        validate_token=False,
-    )
-
+    from apps.bot.bot_factory import make_bot
+    bot = make_bot(threaded=True, skip_pending=True)
     from apps.bot.handlers import register_handlers
     register_handlers(bot)
     return bot

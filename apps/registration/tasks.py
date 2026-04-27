@@ -7,7 +7,6 @@ from datetime import timedelta
 from celery import shared_task
 from django.utils import timezone
 from django.conf import settings
-import telebot
 
 logger = logging.getLogger(__name__)
 
@@ -32,14 +31,13 @@ def send_scheduled_messages():
         logger.info('No scheduled messages to send')
         return {'status': 'success', 'message': 'No scheduled messages to send'}
     
-    # Initialize bot
-    bot_token = settings.BALE_BOT_TOKEN
-    if not bot_token:
+    if not settings.BALE_BOT_TOKEN:
         logger.error('BALE_BOT_TOKEN not found in settings')
         return {'status': 'error', 'message': 'BALE_BOT_TOKEN not configured'}
-    
-    bot = telebot.TeleBot(bot_token)
-    
+
+    from apps.bot.bot_factory import make_bot
+    bot = make_bot()
+
     results = []
 
     for scheduled_msg in pending_messages:
@@ -170,12 +168,12 @@ def dispatch_scheduled_message(self, pk):
         )
         return
 
-    bot_token = settings.BALE_BOT_TOKEN
-    if not bot_token:
+    if not settings.BALE_BOT_TOKEN:
         logger.error('dispatch_scheduled_message: BALE_BOT_TOKEN not configured')
         return
 
-    bot = telebot.TeleBot(bot_token)
+    from apps.bot.bot_factory import make_bot
+    bot = make_bot()
 
     if msg.send_to_all:
         target_users = BotUser.objects.filter(is_blocked=False)
