@@ -3,6 +3,7 @@ Celery tasks for the registration app.
 """
 import logging
 import os
+from datetime import timedelta
 from celery import shared_task
 from django.utils import timezone
 from django.conf import settings
@@ -140,3 +141,63 @@ def _send_message_to_user(bot, chat_id, scheduled_msg):
                 f'{text}\n\n{scheduled_msg.link_url}',
                 parse_mode='Markdown'
             )
+
+
+@shared_task(name='apps.registration.dispatch_scheduled_message', bind=True, max_retries=3)
+def dispatch_scheduled_message(self, pk):
+    """
+    One-shot task scheduled with eta=scheduled_time when admin saves a ScheduledMessage.
+    Falls back gracefully if the message was already sent or the time was moved forward.
+    """
+    from apps.registration.models import ScheduledMessage, BotUser
+
+    try:
+        msg = ScheduledMessage.objects.get(pk=pk)
+    except ScheduledMessage.DoesNotExist:
+        logger.warning(f'dispatch_scheduled_message: ScheduledMessage {pk} not found')
+        return
+
+    if msg.is_sent:
+        logger.info(f'dispatch_scheduled_message: message {pk} already sent, skipping')
+        return
+
+    # If admin moved scheduled_time to the future (>30 s from now), this is a stale task — skip.
+    # A new task was already created by the post_save signal when the time was updated.
+    if msg.scheduled_time > timezone.now() + timedelta(seconds=30):
+        logger.info(
+            f'dispatch_scheduled_message: message {pk} scheduled time is still in the future '
+            f'({msg.scheduled_time}), skipping stale task'
+        )
+        return
+
+    bot_token = settings.BALE_BOT_TOKEN
+    if not bot_token:
+        logger.error('dispatch_scheduled_message: BALE_BOT_TOKEN not configured')
+        return
+
+    bot = telebot.TeleBot(bot_token)
+
+    if msg.send_to_all:
+        target_users = BotUser.objects.filter(is_blocked=False)
+    else:
+        target_users = BotUser.objects.filter(is_registered=True, is_blocked=False)
+
+    success_count = fail_count = 0
+    for user in target_users.iterator():
+        try:
+            _send_message_to_user(bot, user.bale_user_id, msg)
+            success_count += 1
+        except Exception as e:
+            err_code = getattr(e, 'error_code', None)
+            if err_code == 403:
+                user.is_blocked = True
+                user.save(update_fields=['is_blocked'])
+                logger.warning(f'User {user.bale_user_id} blocked the bot, marked as blocked')
+            else:
+                logger.error(f'Failed to send to user {user.bale_user_id}: {e}')
+            fail_count += 1
+
+    msg.is_sent = True
+    msg.sent_at = timezone.now()
+    msg.save(update_fields=['is_sent', 'sent_at'])
+    logger.info(f'dispatch_scheduled_message: sent "{msg.title}" to {success_count} users ({fail_count} failed)')

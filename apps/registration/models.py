@@ -184,8 +184,7 @@ class FinalMessage(models.Model):
     )
     is_active = models.BooleanField(
         verbose_name='فعال',
-        default=True,
-        help_text='فقط یک پیام می‌تواند فعال باشد',
+        default=True
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

@@ -236,17 +236,17 @@ class ScheduledMessageAdmin(admin.ModelAdmin):
 
     def status_badge(self, obj):
         if obj.is_sent:
-            return format_html(
+            return mark_safe(
                 '<span style="background:#198754;color:#fff;padding:2px 10px;'
                 'border-radius:12px;font-size:0.85em">✅ ارسال شده</span>'
             )
         elif obj.scheduled_time <= timezone.now():
-            return format_html(
+            return mark_safe(
                 '<span style="background:#dc3545;color:#fff;padding:2px 10px;'
                 'border-radius:12px;font-size:0.85em">⏰ در حال ارسال...</span>'
             )
         else:
-            return format_html(
+            return mark_safe(
                 '<span style="background:#ffc107;color:#000;padding:2px 10px;'
                 'border-radius:12px;font-size:0.85em">⏳ در انتظار</span>'
             )
@@ -513,7 +513,7 @@ class BotUserAdmin(admin.ModelAdmin):
     def username_display(self, obj):
         if obj.username:
             return format_html('<code style="font-size:0.9em">@{}</code>', obj.username)
-        return format_html('<span style="color:#adb5bd">—</span>')
+        return mark_safe('<span style="color:#adb5bd">—</span>')
     username_display.short_description = 'نام کاربری'
 
     # ── Custom URLs ───────────────────────────────────────────────────────────

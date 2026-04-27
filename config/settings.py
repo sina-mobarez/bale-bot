@@ -58,26 +58,26 @@ TEMPLATES = [
 WSGI_APPLICATION = 'config.wsgi.application'
 
 # ─── Database ─────────────────────────────────────────────────────────────────
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': config('DB_NAME', default='bale_bot_db'),
-        'USER': config('DB_USER', default='bale_bot_user'),
-        'PASSWORD': config('DB_PASSWORD', default='password'),
-        'HOST': config('DB_HOST', default='localhost'),
-        'PORT': config('DB_PORT', default='5432'),
-        'OPTIONS': {
-            'connect_timeout': 10,
-        },
-        'CONN_MAX_AGE': 60,
-    }
-}
 # DATABASES = {
 #     'default': {
-#         'ENGINE': 'django.db.backends.sqlite3',
-#         'NAME': BASE_DIR / 'db.sqlite3',
+#         'ENGINE': 'django.db.backends.postgresql',
+#         'NAME': config('DB_NAME', default='bale_bot_db'),
+#         'USER': config('DB_USER', default='bale_bot_user'),
+#         'PASSWORD': config('DB_PASSWORD', default='password'),
+#         'HOST': config('DB_HOST', default='localhost'),
+#         'PORT': config('DB_PORT', default='5432'),
+#         'OPTIONS': {
+#             'connect_timeout': 10,
+#         },
+#         'CONN_MAX_AGE': 60,
 #     }
 # }
+DATABASES = {
+    'default': {
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME': BASE_DIR / 'db.sqlite3',
+    }
+}
 
 
 # ─── Auth ─────────────────────────────────────────────────────────────────────
@@ -175,6 +175,15 @@ CELERY_ENABLE_UTC = True
 
 # Celery Beat (Scheduler)
 CELERY_BEAT_SCHEDULER = 'django_celery_beat.schedulers:DatabaseScheduler'
+
+# Fallback polling every 60 s — catches any messages whose eta task was missed.
+# DatabaseScheduler syncs this into the DB on first Beat startup.
+CELERY_BEAT_SCHEDULE = {
+    'poll-scheduled-messages': {
+        'task': 'apps.registration.send_scheduled_messages',
+        'schedule': 60.0,
+    },
+}
 
 # ─── Jazzmin Admin UI ─────────────────────────────────────────────────────────
 JAZZMIN_SETTINGS = {
