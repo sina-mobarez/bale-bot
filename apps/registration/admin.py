@@ -2,12 +2,15 @@
 Admin configuration for the registration app.
 """
 import csv
+import io
 from django.contrib import admin
 from django.contrib import messages as django_messages
-from django.http import HttpResponse
+from django.http import HttpResponse, HttpResponseRedirect
+from django.urls import reverse
 from django.utils.html import format_html
 from django.utils.safestring import mark_safe
 from django.utils import timezone
+from django.views.decorators.http import require_http_methods
 
 from .models import Question, FinalMessage, BotUser, RegistrationSession, WelcomeMessage, ScheduledMessage
 
@@ -195,7 +198,7 @@ class ScheduledMessageAdmin(admin.ModelAdmin):
     date_hierarchy = 'scheduled_time'
     fieldsets = (
         ('اطلاعات اصلی', {
-            'fields': ('title', 'message_type', 'scheduled_time'),
+            'fields': ('title', 'message_type', 'scheduled_time', 'send_to_all'),
         }),
         ('محتوا', {
             'fields': ('text_content', 'file', 'photo', 'link_url', 'link_text'),
@@ -365,6 +368,86 @@ def _export_users_csv(queryset):
     return response
 
 
+def _import_users_csv(csv_file):
+    """
+    Parse a CSV file and create/update BotUser records.
+    Returns (created_count, updated_count, error_list).
+    Expected columns: شناسه بله (required), نام کاربری, نام, نام خانوادگی, + answer columns.
+    """
+    from apps.registration.models import RegistrationSession
+    raw = csv_file.read()
+    # Try UTF-8 with BOM first, then plain UTF-8
+    try:
+        text = raw.decode('utf-8-sig')
+    except UnicodeDecodeError:
+        text = raw.decode('utf-8', errors='replace')
+
+    reader = csv.DictReader(io.StringIO(text))
+    headers = reader.fieldnames or []
+
+    # Map Persian column names to model fields
+    col_map = {
+        'شناسه بله': 'bale_user_id',
+        'نام کاربری': 'username',
+        'نام': 'first_name',
+        'نام خانوادگی': 'last_name',
+    }
+    # Columns that are question answers (not meta fields)
+    meta_cols = set(col_map.keys()) | {'ثبت‌نام شده', 'زمان ثبت‌نام', 'اولین بازدید'}
+    answer_cols = [h for h in headers if h not in meta_cols]
+
+    # Build field_name map from question labels → field_name
+    questions = {q.text[:40]: q.field_name for q in Question.objects.filter(is_active=True)}
+
+    created = updated = 0
+    errors = []
+
+    for row_num, row in enumerate(reader, start=2):
+        bale_id_raw = row.get('شناسه بله', '').strip()
+        if not bale_id_raw:
+            errors.append(f'ردیف {row_num}: شناسه بله خالی است')
+            continue
+        try:
+            bale_id = int(bale_id_raw)
+        except ValueError:
+            errors.append(f'ردیف {row_num}: شناسه بله نامعتبر — {bale_id_raw!r}')
+            continue
+
+        defaults = {
+            'username': row.get('نام کاربری', '').strip(),
+            'first_name': row.get('نام', '').strip(),
+            'last_name': row.get('نام خانوادگی', '').strip(),
+        }
+        user, was_created = BotUser.objects.update_or_create(
+            bale_user_id=bale_id,
+            defaults=defaults,
+        )
+        if was_created:
+            created += 1
+        else:
+            updated += 1
+
+        # Build answers dict from answer columns
+        answers = {}
+        for col in answer_cols:
+            val = row.get(col, '').strip()
+            if val and val != '—':
+                field_name = questions.get(col, col)
+                answers[field_name] = val
+
+        if answers:
+            session, _ = RegistrationSession.objects.get_or_create(
+                user=user,
+                defaults={'answers': answers, 'current_question_index': len(answers)},
+            )
+            if not _:
+                # Update existing session answers
+                session.answers.update(answers)
+                session.save(update_fields=['answers'])
+
+    return created, updated, errors
+
+
 @admin.register(BotUser)
 class BotUserAdmin(admin.ModelAdmin):
     list_display = (
@@ -402,6 +485,8 @@ class BotUserAdmin(admin.ModelAdmin):
             'today': today_count,
             'completion_rate': completion_rate,
         }
+        extra_context['import_csv_url'] = reverse('admin:registration_botuser_import_csv')
+        extra_context['export_all_csv_url'] = reverse('admin:registration_botuser_export_all_csv')
         return super().changelist_view(request, extra_context=extra_context)
     fieldsets = (
         ('اطلاعات بله', {
@@ -431,7 +516,7 @@ class BotUserAdmin(admin.ModelAdmin):
         return format_html('<span style="color:#adb5bd">—</span>')
     username_display.short_description = 'نام کاربری'
 
-    # ── Custom URL: export ALL users ──────────────────────────────────────────
+    # ── Custom URLs ───────────────────────────────────────────────────────────
     def get_urls(self):
         from django.urls import path
         urls = super().get_urls()
@@ -441,10 +526,45 @@ class BotUserAdmin(admin.ModelAdmin):
                 self.admin_site.admin_view(self.export_all_csv),
                 name='registration_botuser_export_all_csv',
             ),
+            path(
+                'import-csv/',
+                self.admin_site.admin_view(self.import_csv_view),
+                name='registration_botuser_import_csv',
+            ),
         ] + urls
 
     def export_all_csv(self, request):
         return _export_users_csv(BotUser.objects.select_related('session').order_by('-registered_at'))
+
+    def import_csv_view(self, request):
+        from django.shortcuts import render
+        context = {
+            **self.admin_site.each_context(request),
+            'title': 'وارد کردن کاربران از CSV',
+            'opts': self.model._meta,
+        }
+        if request.method == 'POST':
+            csv_file = request.FILES.get('csv_file')
+            if not csv_file:
+                django_messages.error(request, 'لطفاً یک فایل CSV انتخاب کنید.')
+                return render(request, 'admin/registration/botuser/import_csv.html', context)
+            if not csv_file.name.endswith('.csv'):
+                django_messages.error(request, 'فقط فایل‌های CSV قابل قبول هستند.')
+                return render(request, 'admin/registration/botuser/import_csv.html', context)
+            try:
+                created, updated, errors = _import_users_csv(csv_file)
+                if errors:
+                    django_messages.warning(request, f'{len(errors)} خطا: ' + ' | '.join(errors[:5]))
+                django_messages.success(
+                    request,
+                    f'وارد کردن انجام شد: {created} کاربر جدید، {updated} کاربر به‌روزرسانی شد.',
+                )
+                return HttpResponseRedirect(
+                    reverse('admin:registration_botuser_changelist')
+                )
+            except Exception as e:
+                django_messages.error(request, f'خطا در پردازش فایل: {e}')
+        return render(request, 'admin/registration/botuser/import_csv.html', context)
 
     # ── Actions ───────────────────────────────────────────────────────────────
     @admin.action(description='📥 خروجی CSV (کاربران انتخابی)')

@@ -39,30 +39,38 @@ def send_scheduled_messages():
     
     bot = telebot.TeleBot(bot_token)
     
-    # Get all registered users
-    registered_users = BotUser.objects.filter(
-        is_registered=True,
-        is_blocked=False
-    )
-    
-    if not registered_users.exists():
-        logger.warning('No registered users found')
-        return {'status': 'warning', 'message': 'No registered users found'}
-    
     results = []
-    
+
     for scheduled_msg in pending_messages:
         logger.info(f'Sending scheduled message: {scheduled_msg.title}')
-        
+
+        if scheduled_msg.send_to_all:
+            target_users = BotUser.objects.filter(is_blocked=False)
+        else:
+            target_users = BotUser.objects.filter(is_registered=True, is_blocked=False)
+
+        if not target_users.exists():
+            logger.warning(f'No target users for message: {scheduled_msg.title}')
+            scheduled_msg.is_sent = True
+            scheduled_msg.sent_at = timezone.now()
+            scheduled_msg.save()
+            results.append({'title': scheduled_msg.title, 'success': 0, 'failed': 0, 'total': 0})
+            continue
+
         success_count = 0
         fail_count = 0
-        
-        for user in registered_users:
+
+        for user in target_users.iterator():
             try:
                 _send_message_to_user(bot, user.bale_user_id, scheduled_msg)
                 success_count += 1
             except Exception as e:
                 logger.error(f'Failed to send message to user {user.bale_user_id}: {e}')
+                err_code = getattr(e, 'error_code', None)
+                if err_code == 403:
+                    user.is_blocked = True
+                    user.save(update_fields=['is_blocked'])
+                    logger.warning(f'User {user.bale_user_id} blocked the bot, marked as blocked')
                 fail_count += 1
         
         # Mark as sent

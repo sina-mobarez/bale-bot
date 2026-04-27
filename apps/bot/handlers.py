@@ -33,6 +33,12 @@ _RATE_MAX_MESSAGES   = 8
 _user_timestamps: dict = defaultdict(deque)
 
 
+def _normalize_digits(text: str) -> str:
+    """Convert Persian (۰-۹) and Arabic-Indic (٠-٩) digits to ASCII digits."""
+    table = str.maketrans('۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩', '01234567890123456789')
+    return text.translate(table)
+
+
 def _is_rate_limited(user_id: int) -> bool:
     """Returns True if the user has exceeded the rate limit."""
     now = time.monotonic()
@@ -167,7 +173,7 @@ def validate_answer(question, text: str):
     qtype = question.question_type
 
     if qtype == Question.QuestionType.PHONE:
-        cleaned = re.sub(r'[\s\-\(\)]', '', text)
+        cleaned = re.sub(r'[\s\-\(\)]', '', _normalize_digits(text))
         if not re.match(r'^(\+98|0098|0)?9\d{9}$', cleaned):
             return False, question.validation_hint or '⚠️ شماره موبایل معتبر نیست. مثال: 09123456789'
         return True, ''
@@ -277,7 +283,10 @@ def send_final_message(bot: telebot.TeleBot, chat_id: int, final_msg):
 
     except Exception as e:
         logger.error(f'Error sending final message to {chat_id}: {e}', exc_info=True)
-        bot.send_message(chat_id, '✅ ثبت‌نام شما با موفقیت انجام شد!')
+        try:
+            bot.send_message(chat_id, '✅ ثبت‌نام شما با موفقیت انجام شد!')
+        except Exception as inner_e:
+            logger.warning(f'Could not send fallback message to {chat_id}: {inner_e}')
 
 
 # ─── Register all handlers ────────────────────────────────────────────────────
@@ -391,8 +400,17 @@ def register_handlers(bot: telebot.TeleBot):
         current_q = questions[idx]
         is_valid, error_msg = validate_answer(current_q, text)
         if not is_valid:
-            bot.send_message(chat_id, error_msg)
-            send_question(bot, chat_id, current_q)
+            try:
+                bot.send_message(chat_id, error_msg)
+                send_question(bot, chat_id, current_q)
+            except Exception as e:
+                err_code = getattr(e, 'error_code', None)
+                if err_code == 403:
+                    bot_user.is_blocked = True
+                    bot_user.save(update_fields=['is_blocked'])
+                    logger.warning(f'User {tg_user.id} blocked the bot (403), marked as blocked')
+                else:
+                    logger.error(f'Error replying to {chat_id}: {e}')
             return
 
         next_idx = idx + 1

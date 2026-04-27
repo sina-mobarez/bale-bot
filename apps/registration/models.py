@@ -322,6 +322,11 @@ class ScheduledMessage(models.Model):
         verbose_name='زمان ارسال',
         help_text='پیام در این زمان به همه کاربران ثبت‌نام شده ارسال می‌شود',
     )
+    send_to_all = models.BooleanField(
+        verbose_name='ارسال به همه کاربران',
+        default=False,
+        help_text='اگر فعال باشد، پیام به همه کاربران (حتی آن‌هایی که ثبت‌نام کامل نکرده‌اند) ارسال می‌شود',
+    )
     is_sent = models.BooleanField(verbose_name='ارسال شده', default=False, db_index=True)
     sent_at = models.DateTimeField(verbose_name='زمان ارسال واقعی', null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
